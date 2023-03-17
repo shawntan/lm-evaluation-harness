@@ -1,23 +1,25 @@
+import os
+import json
+
 import torch
+from torch.nn.parallel import DistributedDataParallel as DDP
 import transformers
+from transformers import GPT2Tokenizer
 from lm_eval.base import BaseLM
 
+from .sparse_transformer.model import GPT
 
 class HFLM(BaseLM):
     def __init__(
         self,
         device="cuda",
-        pretrained="gpt2-medium",
-        revision="main",
-        low_cpu_mem_usage=None,
-        subfolder=None,
-        tokenizer=None,
+        model_path="/dccstor/codeai/yikang/SparseGPT/checkpoints/all_the_pile_vt-350m_BSZ6_BLOCKSZ512_ATTstickbreaking_HLENGTH512_SAMPLETOPK0_MOEPDROP0_GATING256_TOPK1_AUXmi0.01",
         batch_size=1,
     ):
         super().__init__()
 
         assert isinstance(device, str)
-        assert isinstance(pretrained, str)
+        assert isinstance(model_path, str)
         assert isinstance(batch_size, int)
 
         if device:
@@ -34,18 +36,29 @@ class HFLM(BaseLM):
                 else torch.device("cpu")
             )
 
-        # TODO: update this to be less of a hack once subfolder is fixed in HF
-        revision = revision + ("/" + subfolder if subfolder is not None else "")
+        checkpoint_config = json.load(open(model_path + "/config.json", 'r'))
 
-        self.gpt2 = transformers.AutoModelForCausalLM.from_pretrained(
-            pretrained, revision=revision, low_cpu_mem_usage=low_cpu_mem_usage
-        ).to(self.device)
-        self.gpt2.eval()
+        # load tokenizer and dataset
+        print("Loading vocab...")
+        vocab_path = os.path.join('/dccstor/codeai/yikang/SparseGPT/datasets/vocabularies', checkpoint_config['dataset']['tokenizer'])
+        self.tokenizer = GPT2Tokenizer.from_pretrained(vocab_path)
 
-        self.tokenizer = transformers.AutoTokenizer.from_pretrained(
-            pretrained if tokenizer is None else tokenizer,
-            revision=revision,
-        )
+        model_config = GPT.get_default_config()
+        model_config.merge_from_dict(checkpoint_config['model'])
+        model_config.vocab_size = len(self.tokenizer)
+        self.model = GPT(model_config).to(self.device)
+        self.model.eval()
+
+        # checkpoint_path = os.path.join(model_path, ('checkpoint/rank_%d.pt' % 0))
+        checkpoint_path = os.path.join(model_path, 'checkpoint/latest.pt')
+        checkpoint = torch.load(checkpoint_path)['model_state_dict']
+        new_checkpoint = {}
+        for k, v in checkpoint.items():
+            if 'module' in k:
+                new_checkpoint[k.replace('module.', '')] = v
+            else:
+                new_checkpoint[k] = v
+        self.model.load_state_dict(new_checkpoint)
 
         assert isinstance(
             self.tokenizer,
@@ -84,11 +97,7 @@ class HFLM(BaseLM):
 
     @property
     def max_length(self):
-        try:
-            return self.gpt2.config.n_ctx
-        except AttributeError:
-            # gptneoconfig doesn't have n_ctx apparently
-            return self.gpt2.config.max_position_embeddings
+        return 512 * 24
 
     @property
     def max_gen_toks(self):
@@ -118,12 +127,22 @@ class HFLM(BaseLM):
         returns: a torch tensor of shape [batch, sequence, vocab] with the
         logits returned from the model
         """
-        with torch.no_grad():
-            return self.gpt2(inps)[0]
+        # inps = inps.chunk(inps.shape[1] // 512 + 1, dim=1)
+        split_size = [512] * (inps.shape[1] // 512) 
+        if inps.shape[1] % 512 > 0:
+            split_size += [inps.shape[1] % 512]
+        inps = torch.split(inps, split_size, dim=1)
+        outputs = []
+        hidden = None
+        for inp in inps:
+            with torch.no_grad():
+                logits, _, _, hidden = self.model(inp, hidden=hidden)
+                outputs.append(logits)
+        return torch.cat(outputs, dim=1)
 
     def _model_generate(self, context, max_length, eos_token_id):
-        return self.gpt2.generate(
-            context, max_length=max_length, eos_token_id=eos_token_id, do_sample=False
+        return self.model.generate(
+            context, max_new_tokens=max_length, eos_token_id=eos_token_id, do_sample=False
         )
 
 

@@ -1,4 +1,5 @@
 from . import gpt2
+from . import gpt_st
 from . import gpt3
 from . import huggingface
 from . import textsynth
@@ -8,6 +9,7 @@ MODEL_REGISTRY = {
     "hf": gpt2.HFLM,
     "hf-causal": huggingface.AutoCausalLM,
     "hf-seq2seq": huggingface.AutoSeq2SeqLM,
+    "gpt-st": gpt_st.GPT2LM,
     "gpt2": gpt2.GPT2LM,
     "gpt3": gpt3.GPT3LM,
     "textsynth": textsynth.TextSynthLM,
