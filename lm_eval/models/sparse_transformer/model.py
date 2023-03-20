@@ -99,7 +99,7 @@ class SparseCausalSelfAttention(nn.Module):
 
         self.register_buffer(
             "mask", 
-            torch.tril(torch.ones(config.block_size + config.history_length, config.block_size  + config.history_length, dtype=torch.float))
+            torch.tril(torch.ones(config.block_size + config.history_length, config.block_size  + config.history_length, dtype=torch.int8))
         )
         self.register_buffer(
             "cum_weight", 
@@ -123,6 +123,8 @@ class SparseCausalSelfAttention(nn.Module):
             new_v = torch.cat([v_history, v], dim=1)
         k_history = new_k.detach()
         v_history = new_v.detach()
+        # k_history = new_k[:, -self.history_length:].detach()
+        # v_history = new_v[:, -self.history_length:].detach()
 
         return new_k, new_v, (k_history, v_history)
 
@@ -142,9 +144,9 @@ class SparseCausalSelfAttention(nn.Module):
         k = k.view(B, context_length, self.n_head, self.head_size) # (B, T, nh, hs)
         v = v.view(B, context_length, self.n_head, self.head_size) # (B, T, nh, hs)
 
-        mask = self.mask[context_length - T:context_length, :context_length]
-        # tril_ones = torch.tril(torch.ones(context_length, context_length, dtype=x.dtype, device=x.device))
-        # mask = tril_ones[context_length - T:]
+        # mask = self.mask[context_length - T:context_length, :context_length]
+        tril_ones = torch.tril(torch.ones(context_length, context_length, dtype=x.dtype, device=x.device))
+        mask = tril_ones[context_length - T:]
 
         # causal self-attention; Self-attend: (B, T, k, nh, hs) x (B, T, nh, hs) -> (B, T, T, k, nh)
         att = torch.einsum('bikhd,bjhd->bijkh', q, k) * (1.0 / math.sqrt(k.size(-1)))
@@ -152,9 +154,9 @@ class SparseCausalSelfAttention(nn.Module):
             att = att.masked_fill(mask[None, :, :, None, None] == 0, float('-inf'))
             att = F.softmax(att, dim=2)
         else:
-            # att = att + self.bias
-            # cum_weight = tril_ones.tril(-1)
-            att = stickbreaking(att, mask=mask, cum_weight=self.cum_weight[:context_length, :context_length])
+            cum_weight = tril_ones.tril(-1)
+            # cum_weight = self.cum_weight[:context_length, :context_length]
+            att = stickbreaking(att, mask=mask, cum_weight=cum_weight)
         att = self.attn_dropout(att)
         # y = att @ v 
         y = torch.einsum('bijkh,bjhd->bikhd', att, v) # (B, T, T, k, nh) x (B, T, nh, hs) -> (B, T, k, nh, hs)
@@ -438,7 +440,7 @@ class GPT(nn.Module):
     def forward(self, idx, targets=None, hidden=None):
         device = idx.device
         b, t = idx.size()
-        # assert t <= self.block_size, f"Cannot forward sequence of length {t}, block size is only {self.block_size}"
+        assert t <= self.block_size, f"Cannot forward sequence of length {t}, block size is only {self.block_size}"
 
         # forward the GPT model itself
         tok_emb = self.transformer.wte(idx) # token embeddings of shape (b, t, n_embd)
