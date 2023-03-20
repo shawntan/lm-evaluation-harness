@@ -29,7 +29,7 @@ def simple_parse_args_string(args_string):
     if not args_string:
         return {}
     arg_list = args_string.split(",")
-    args_dict = OmegaConf.to_object(OmegaConf.from_dotlist(arg_list))
+    args_dict = OmegaConf.create(OmegaConf.from_dotlist(arg_list))
     return args_dict
 
 
