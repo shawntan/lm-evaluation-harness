@@ -505,8 +505,8 @@ class GPT(nn.Module):
             # forward the model to get the logits for the index in the sequence
             logits, _, _, hidden = self(idx_next, hidden=hidden)
             idx_next = sample_idx(logits)
+            output.append(idx_next)
             if (idx_next == eos_token_id).all():
                 break
-            output.append(idx_next)
 
         return torch.cat(output, dim=1), hidden

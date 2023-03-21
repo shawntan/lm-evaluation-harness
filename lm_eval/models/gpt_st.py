@@ -4,7 +4,7 @@ import json
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 import transformers
-from transformers import GPT2Tokenizer
+from transformers import AutoTokenizer
 from lm_eval.base import BaseLM
 
 from .sparse_transformer.model import GPT
@@ -40,8 +40,8 @@ class HFLM(BaseLM):
 
         # load tokenizer and dataset
         print("Loading vocab...")
-        vocab_path = os.path.join('/dccstor/codeai/yikang/SparseGPT/datasets/vocabularies', checkpoint_config['dataset']['tokenizer'])
-        self.tokenizer = GPT2Tokenizer.from_pretrained(vocab_path)
+        # vocab_path = os.path.join('/dccstor/codeai/yikang/datasets/vocabularies', checkpoint_config['dataset']['tokenizer'])
+        self.tokenizer = AutoTokenizer.from_pretrained(checkpoint_config['dataset']['tokenizer'])
 
         model_config = GPT.get_default_config()
         model_config.merge_from_dict(checkpoint_config['model'])
