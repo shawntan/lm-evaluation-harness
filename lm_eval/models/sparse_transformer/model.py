@@ -30,11 +30,26 @@ def stickbreaking(logits: torch.Tensor, mask: torch.Tensor, cum_weight: torch.Te
     """
     Stick-breaking attention weights.
     """
-    log_z = F.logsigmoid(logits)
-    log_beta = (log_z - logits).masked_fill(mask[None, :, :, None, None] == 0, 0)
+    mask = (mask[None, :, :, None, None] == 0).expand_as(logits)
+    log_z = F.logsigmoid(logits).masked_fill(mask, float('-inf'))
+    log_beta = F.logsigmoid(-logits).masked_fill(mask, 0)
     re_cum_log_beta = torch.einsum('bijnh,jk->biknh', log_beta, cum_weight)
     log_p = log_z + re_cum_log_beta
-    return log_p.exp().masked_fill(mask[None, :, :, None, None] == 0, 0)
+    return log_p.exp()
+
+@torch.jit.script
+def stickbreaking_att(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, mask: torch.Tensor, cum_weight: torch.Tensor) -> torch.Tensor:
+    """
+    Stick-breaking attention weights.
+    """
+    logits = torch.einsum('bikhd,bjhd->bkhij', q, k) / math.sqrt(k.size(-1))
+    mask = (mask[None, None, None, :, :] == 0).expand_as(logits)
+    z = F.sigmoid(logits).masked_fill(mask, 0)
+    log_beta = F.logsigmoid(-logits).masked_fill(mask, 0)
+    re_cum_log_beta = torch.einsum('bnhij,jk->bnhik', log_beta, cum_weight)
+    att = z * re_cum_log_beta.exp()
+    y = torch.einsum('bkhij,bjhd->bikhd', att, v) 
+    return y
 
 class SparseCausalSelfAttention(nn.Module):
     """
@@ -147,19 +162,7 @@ class SparseCausalSelfAttention(nn.Module):
         # mask = self.mask[context_length - T:context_length, :context_length]
         tril_ones = torch.tril(torch.ones(context_length, context_length, dtype=x.dtype, device=x.device))
         mask = tril_ones[context_length - T:]
-
-        # causal self-attention; Self-attend: (B, T, k, nh, hs) x (B, T, nh, hs) -> (B, T, T, k, nh)
-        att = torch.einsum('bikhd,bjhd->bijkh', q, k) * (1.0 / math.sqrt(k.size(-1)))
-        if self.att_func == 'softmax':
-            att = att.masked_fill(mask[None, :, :, None, None] == 0, float('-inf'))
-            att = F.softmax(att, dim=2)
-        else:
-            cum_weight = tril_ones.tril(-1)
-            # cum_weight = self.cum_weight[:context_length, :context_length]
-            att = stickbreaking(att, mask=mask, cum_weight=cum_weight)
-        att = self.attn_dropout(att)
-        # y = att @ v 
-        y = torch.einsum('bijkh,bjhd->bikhd', att, v) # (B, T, T, k, nh) x (B, T, nh, hs) -> (B, T, k, nh, hs)
+        y = stickbreaking_att(q, k, v, mask=mask, cum_weight=tril_ones.tril(-1))
 
         # output projection
         y = self.q_proj.reduce(y.reshape(B, T, self.top_k, self.att_hidden).type_as(x))
@@ -337,6 +340,16 @@ class GPT(nn.Module):
                     n_layer=24, n_head=16, n_embd=1024, universal=False, 
                     n_att_experts=16, n_mlp_experts=16, 
                     att_hidden=1024, ffd_hidden=4096
+                    ),
+                'st-deep-k2':         dict(
+                    n_layer=24, n_head=8, n_embd=1024, universal=False, 
+                    n_att_experts=32, n_mlp_experts=32, k_att=2, k_mlp=2, 
+                    att_hidden=512, ffd_hidden=2048
+                    ),
+                'st-deep-wide':         dict(
+                    n_layer=24, n_head=16, n_embd=2048, universal=False, 
+                    n_att_experts=8, n_mlp_experts=32, 
+                    att_hidden=1024, ffd_hidden=1024
                     ),
                 'st-deep':         dict(
                     n_layer=24, n_head=16, n_embd=1024, universal=False, 
