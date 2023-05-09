@@ -7,7 +7,8 @@ from . import dummy
 
 MODEL_REGISTRY = {
     "hf": gpt2.HFLM,
-    "hf-causal": huggingface.AutoCausalLM,
+    "hf-causal": gpt2.HFLM,
+    "hf-causal-experimental": huggingface.AutoCausalLM,
     "hf-seq2seq": huggingface.AutoSeq2SeqLM,
     "gpt-st": gpt_st.GPT2LM,
     "gpt2": gpt2.GPT2LM,

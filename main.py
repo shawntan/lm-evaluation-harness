@@ -32,7 +32,7 @@ def parse_args():
     parser.add_argument("--tasks", default=None, choices=MultiChoice(tasks.ALL_TASKS))
     parser.add_argument("--provide_description", action="store_true")
     parser.add_argument("--num_fewshot", type=int, default=0)
-    parser.add_argument("--batch_size", type=int, default=None)
+    parser.add_argument("--batch_size", type=str, default=None)
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--output_path", default=None)
     parser.add_argument("--limit", type=int, default=None)
@@ -51,7 +51,7 @@ def pattern_match(patterns, source_list):
     for pattern in patterns:
         for matching in fnmatch.filter(source_list, pattern):
             task_names.add(matching)
-    return list(task_names)
+    return sorted(list(task_names))
 
 
 def main():
