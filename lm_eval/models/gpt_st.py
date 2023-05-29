@@ -6,8 +6,12 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import transformers
 from transformers import GPT2Tokenizer
 from lm_eval.base import BaseLM
+import torch.distributed as dist
 
-from .sparse_transformer.model import GPT
+# from .sparse_transformer.model import GPT
+import sys
+sys.path.insert(1, '/gpfs/u/home/LSMC/LSMCgnjn/scratch/SparseGPT-pytorch2-no-ac/')
+from mingpt.model import GPT
 
 class HFLM(BaseLM):
     def __init__(
@@ -40,7 +44,11 @@ class HFLM(BaseLM):
 
         # load tokenizer and dataset
         print("Loading vocab...")
-        vocab_path = os.path.join('/dccstor/codeai/yikang/SparseGPT/datasets/vocabularies', checkpoint_config['dataset']['tokenizer'])
+        # vocab_path = os.path.join('/dccstor/codeai/yikang/SparseGPT/datasets/vocabularies', checkpoint_config['dataset']['tokenizer'])
+        vocab_path = os.path.join(
+            '/gpfs/u/home/LSMC/LSMCgnjn/scratch/SparseGPT/datasets/vocabularies',
+            checkpoint_config['dataset']['tokenizer']
+        )
         self.tokenizer = GPT2Tokenizer.from_pretrained(vocab_path)
 
         model_config = GPT.get_default_config()
@@ -51,6 +59,7 @@ class HFLM(BaseLM):
 
         # checkpoint_path = os.path.join(model_path, ('checkpoint/rank_%d.pt' % 0))
         checkpoint_path = os.path.join(model_path, 'checkpoint/latest.pt')
+        # checkpoint_path = os.path.join(model_path, 'checkpoint/best.pt')
         checkpoint = torch.load(checkpoint_path)['model_state_dict']
         new_checkpoint = {}
         for k, v in checkpoint.items():
@@ -136,7 +145,7 @@ class HFLM(BaseLM):
         hidden = None
         for inp in inps:
             with torch.no_grad():
-                logits, _, _, hidden = self.model(inp, hidden=hidden)
+                logits, _, _, hidden, _ = self.model(inp, hidden=hidden)
                 outputs.append(logits)
         return torch.cat(outputs, dim=1)
 

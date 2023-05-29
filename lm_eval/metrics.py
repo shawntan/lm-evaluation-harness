@@ -3,7 +3,7 @@ from collections.abc import Iterable
 
 import numpy as np
 import sacrebleu
-import sklearn.metrics
+# import sklearn.metrics
 import random
 
 

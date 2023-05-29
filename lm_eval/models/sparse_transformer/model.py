@@ -382,6 +382,28 @@ class GPT(nn.Module):
                     n_layer=12, n_head=16, n_embd=2048, universal=True, 
                     n_att_experts=24, n_mlp_experts=24, 
                     att_hidden=1024, ffd_hidden=2048),
+                'ut':         dict(
+                    n_layer=12, n_head=64, n_embd=2048, universal=True, 
+                    n_att_experts=1, n_mlp_experts=1,
+                    att_hidden=4096, ffd_hidden=4 * 4096),
+                'sut-200M': dict(
+                    n_layer=12, n_head=16, n_embd=1024, universal=True, 
+                    n_att_experts=16, n_mlp_experts=14, 
+                    att_hidden=1024, ffd_hidden=4096),
+                'sut-200M-2E': dict(
+                    n_layer=12, n_head=16, n_embd=1024, universal=True,
+                    n_att_experts=32, n_mlp_experts=28, 
+                    att_hidden=512, ffd_hidden=2048),
+                'sut-350M-2E': dict(
+                    n_layer=24, n_head=16, n_embd=1024, universal=True,
+                    n_att_experts=48, n_mlp_experts=48,
+                    att_hidden=512, ffd_hidden=2048),
+                'sut-350M-2E-fullrank': dict(
+                    n_layer=24, n_embd=1024,
+                    n_att_experts=48, att_hidden=1024, n_head=1,
+                    n_mlp_experts=48, ffd_hidden=2048,
+                    universal=True,
+                ), # if config.att_hidden == config.n_embd and config.n_head == 1:
             }[config.model_type])
 
         self.universal = config.universal
@@ -457,7 +479,8 @@ class GPT(nn.Module):
             for i in range(self.n_layer):
                 x, _, hidden_i = self.transformer.h[0](x, hidden[i])
                 new_hidden.append(hidden_i)
-            aux_loss = self.transformer.h[0].get_aux_loss_and_clear()
+            # aux_loss = self.transformer.h[0].get_aux_loss_and_clear()
+            aux_loss = 0.
         else:
             aux_loss = 0
             for block, hidden in zip(self.transformer.h, hidden):
@@ -508,5 +531,8 @@ class GPT(nn.Module):
             if (idx_next == eos_token_id).all():
                 break
             output.append(idx_next)
-
-        return torch.cat(output, dim=1), hidden
+        if len(output) > 0: 
+            return torch.cat(output, dim=1), hidden
+        else:
+            return torch.tensor([[]]), hidden
+        

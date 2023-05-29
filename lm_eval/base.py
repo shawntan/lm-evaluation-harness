@@ -438,6 +438,13 @@ class Task(abc.ABC):
             - `datasets.DownloadMode.FORCE_REDOWNLOAD`
                 Fresh download and fresh dataset.
         """
+
+        print("path=", self.DATASET_NAME)
+        print("name=", self.DATASET_PATH)
+        print("data_dir=", data_dir)
+        print("cache_dir=", cache_dir)
+        print("download_mode=", download_mode)
+
         self.dataset = datasets.load_dataset(
             path=self.DATASET_PATH,
             name=self.DATASET_NAME,

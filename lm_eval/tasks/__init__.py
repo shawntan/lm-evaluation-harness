@@ -97,12 +97,12 @@ TASK_REGISTRY = {
     "wnli": glue.WNLI,
     # SuperGLUE
     "boolq": superglue.BoolQ,
-    "cb": superglue.CommitmentBank,
-    "copa": superglue.Copa,
-    "multirc": superglue.MultiRC,
-    "record": superglue.ReCoRD,
-    "wic": superglue.WordsInContext,
-    "wsc": superglue.SGWinogradSchemaChallenge,
+    # "cb": superglue.CommitmentBank,
+    # "copa": superglue.Copa,
+    # "multirc": superglue.MultiRC,
+    # "record": superglue.ReCoRD,
+    # "wic": superglue.WordsInContext,
+    # "wsc": superglue.SGWinogradSchemaChallenge,
     # Order by benchmark/genre?
     "coqa": coqa.CoQA,
     "drop": drop.DROP,
