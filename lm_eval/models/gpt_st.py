@@ -4,7 +4,7 @@ import json
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 import transformers
-from transformers import GPT2Tokenizer
+from transformers import AutoTokenizer
 from lm_eval.base import BaseLM
 import torch.distributed as dist
 
@@ -69,15 +69,15 @@ class HFLM(BaseLM):
                 new_checkpoint[k] = v
         self.model.load_state_dict(new_checkpoint)
 
-        assert isinstance(
-            self.tokenizer,
-            (
-                transformers.GPT2Tokenizer,
-                transformers.GPT2TokenizerFast,
-                transformers.T5Tokenizer,
-                transformers.T5TokenizerFast,
-            ),
-        ), "this tokenizer has not been checked for compatibility yet!"
+        # assert isinstance(
+        #     self.tokenizer,
+        #     (
+        #         transformers.GPT2Tokenizer,
+        #         transformers.GPT2TokenizerFast,
+        #         transformers.T5Tokenizer,
+        #         transformers.T5TokenizerFast,
+        #     ),
+        # ), "this tokenizer has not been checked for compatibility yet!"
 
         self.vocab_size = self.tokenizer.vocab_size
 
@@ -123,7 +123,7 @@ class HFLM(BaseLM):
         return self._device
 
     def tok_encode(self, string: str):
-        return self.tokenizer.encode(string, add_special_tokens=False)
+        return self.tokenizer.encode(string, add_special_tokens=False, max_length=self.max_length)
 
     def tok_decode(self, tokens):
         return self.tokenizer.decode(tokens)
