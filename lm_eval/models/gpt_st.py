@@ -10,7 +10,7 @@ import torch.distributed as dist
 
 # from .sparse_transformer.model import GPT
 import sys
-sys.path.insert(1, '/gpfs/u/home/LSMC/LSMCgnjn/scratch/SparseGPT-pytorch2-no-ac/')
+sys.path.insert(1, '/gpfs/u/home/LSMC/LSMCgnjn/scratch/SparseGPT-fixspike/')
 from mingpt.model import GPT
 
 class HFLM(BaseLM):
@@ -145,7 +145,8 @@ class HFLM(BaseLM):
         hidden = None
         for inp in inps:
             with torch.no_grad():
-                logits, _, _, hidden, _ = self.model(inp, hidden=hidden)
+                with torch.autocast(device_type='cuda', dtype=torch.float16):
+                    logits, _, _, hidden, _ = self.model(inp, hidden=hidden)
                 outputs.append(logits)
         return torch.cat(outputs, dim=1)
 

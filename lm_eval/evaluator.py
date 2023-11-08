@@ -307,8 +307,9 @@ def make_table(result_dict):
     latex_writer.headers = ["Task", "Version", "Metric", "Value", "", "Stderr"]
 
     values = []
-
-    for k, dic in result_dict["results"].items():
+    result_dict_items = list(result_dict["results"].items())
+    result_dict_items.sort(key=lambda x: x[0])
+    for k, dic in result_dict_items:
         version = result_dict["versions"][k]
         for m, v in dic.items():
             if m.endswith("_stderr"):
