@@ -56,9 +56,11 @@ class MixtralSparseMoeBlock(nn.Module):
             top_k=self.top_k,
             activation=ACT2FN[config.hidden_act]
         )
+        self.original = None
 
 
     def forward(self, hidden_states: torch.Tensor):
+        orig_out, _ = self.original(hidden_states)
         batch_size, sequence_length, hidden_dim = hidden_states.shape
         hidden_states = hidden_states.view(-1, hidden_dim)
         def check_vals(x):
@@ -78,6 +80,9 @@ class MixtralSparseMoeBlock(nn.Module):
         final_hidden_states = self.moe_mlp(hidden_states, routing_weights, selected_experts)
         check_vals(final_hidden_states)
         final_hidden_states = final_hidden_states.view(batch_size, sequence_length, hidden_dim)
+
+        diff = torch.abs(orig_out - final_hidden_states)
+        print("max diff:", diff.max())
         return final_hidden_states, router_logits
 
 
@@ -595,6 +600,7 @@ class HFLM(TemplateLM):
                 device = mlp_orig.gate.weight.device
                 print("Layer", layer, "device", device)
                 mlp = MixtralSparseMoeBlock(self._config)
+                mlp.original = mlp_orig
                 state_dict_orig = mlp_orig.state_dict()
                 for n, p in mlp.named_parameters():
                     if n in state_dict_orig:
