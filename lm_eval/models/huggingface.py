@@ -544,6 +544,18 @@ class HFLM(TemplateLM):
                 trust_remote_code=trust_remote_code,
                 **model_kwargs,
             )
+            for layer in range(32):
+                print(layer, [
+                    max(
+                        self._model.model.layers[layer].block_sparse_moe.experts[i].w1.weight.amax().item(),
+                        self._model.model.layers[layer].block_sparse_moe.experts[i].w3.weight.amax().item()
+                    )
+                    for i in range(8)
+                ])
+
+
+            import inspect
+            print(inspect.getfile(self._model.__class__))
         else:
             try:
                 from auto_gptq import AutoGPTQForCausalLM
