@@ -34,7 +34,8 @@ from lm_eval.models.utils import (
     stop_sequences_criteria,
 )
 import sys
-sys.path.insert(1, '../SparseGPT')
+sys.path.insert(1, '/workspace/shawntan/SparseGPT/')
+import llama
 from llama.modeling_llama import LlamaModel, LlamaForCausalLM, LlamaConfig
 
 
@@ -66,7 +67,7 @@ def _get_accelerate_args(
     return args
 
 
-@register_model("mixtral_scattermoe")
+@register_model("openllama_sb")
 class HFLM(TemplateLM):
     """
     An abstracted Huggingface model class. Enables usage with both models of
