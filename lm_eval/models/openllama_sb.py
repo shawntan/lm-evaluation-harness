@@ -37,10 +37,11 @@ import sys
 sys.path.insert(1, '/workspace/shawntan/SparseGPT/')
 import llama
 from llama.modeling_llama import LlamaModel, LlamaForCausalLM, LlamaConfig
+from preprocess_data import load_tokenizer, preprocess_data
 
 
 eval_logger = utils.eval_logger
-
+MODEL_NAME = "openlm-research/open_llama_3b_v2"
 
 def _get_accelerate_args(
     device_map_option: Optional[str] = "auto",
@@ -465,11 +466,26 @@ class HFLM(TemplateLM):
         revision: str = "main",
         trust_remote_code: bool = False,
     ) -> None:
+        """
         self._config = LlamaConfig.from_pretrained(
             pretrained,
             revision=revision,
             trust_remote_code=trust_remote_code,
         )
+        """
+        self._config = LlamaConfig.from_pretrained(
+            MODEL_NAME,
+            torch_dtype=torch.bfloat16,
+            low_cpu_mem_usage=True,
+        )
+        hf_config.n_attention_heads = 16 # config.model.n_head
+        hf_config.num_key_value_heads = 16 # config.model.n_head
+        hf_config.intermediate_size = 2730 # config.model.ffd_hidden
+        hf_config.hidden_size = 1024 # config.model.n_embd
+        hf_config.num_hidden_layers = 24 # config.model.n_layer
+
+
+
 
     def _create_model(
         self,
@@ -536,6 +552,7 @@ class HFLM(TemplateLM):
                         model_kwargs["bnb_4bit_compute_dtype"] = get_dtype(
                             model_kwargs["bnb_4bit_compute_dtype"]
                         )
+            """
             self._model = self.AUTO_MODEL_CLASS.from_pretrained(
                 pretrained,
                 revision=revision,
@@ -543,6 +560,11 @@ class HFLM(TemplateLM):
                 trust_remote_code=trust_remote_code,
                 **model_kwargs,
             )
+            """
+            self._model = LlamaForCausalLM(self._config)
+            state_dict = torch.load("%s/checkpoint/latest.pt/pytorch_model.bin" % pretrained)
+            model.load_state_dict(state_dict)
+
 
         else:
             try:
