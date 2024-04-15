@@ -33,14 +33,74 @@ from lm_eval.models.utils import (
     pad_and_concat,
     stop_sequences_criteria,
 )
-import sys
-sys.path.insert(1, '../scattermoe/examples/')
-from mixtral.modeling_mixtral import MixtralModel, MixtralForCausalLM
-from mixtral.configuration_mixtral import MixtralConfig
-
-
+from torch import nn
+import scattermoe
+from transformers.activations import ACT2FN
 
 eval_logger = utils.eval_logger
+
+class MixtralSparseMoeBlock(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.hidden_dim = config.hidden_size
+        self.ffn_dim = config.intermediate_size
+        self.num_experts = config.num_local_experts
+        self.top_k = config.num_experts_per_tok
+
+        # gating
+        self.gate = nn.Linear(self.hidden_dim, self.num_experts, bias=False)
+        self.moe_mlp = scattermoe.mlp.GLUMLP(
+            input_size=self.hidden_dim,
+            hidden_size=self.ffn_dim,
+            num_experts=self.num_experts,
+            top_k=self.top_k,
+            activation=ACT2FN[config.hidden_act]
+        )
+        self.original = None
+
+    def _forward(self, hidden_states: torch.Tensor):
+        def check_vals(x):
+            assert not (torch.isnan(x) | torch.isinf(x)).any()
+
+        batch_size, sequence_length, hidden_dim = hidden_states.shape
+        hidden_states = hidden_states.view(-1, hidden_dim)
+   
+        check_vals(hidden_states)
+        # router_logits: (batch * sequence_length, n_experts)
+        router_logits = self.gate(hidden_states)
+        check_vals(router_logits)
+
+        routing_weights = F.softmax(router_logits, dim=1, dtype=torch.float)
+        routing_weights, selected_experts = torch.topk(routing_weights, self.top_k, dim=-1)
+        # print(torch.bincount(selected_experts.flatten()))
+        routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
+        # we cast back to the input dtype
+        routing_weights = routing_weights.to(hidden_states.dtype)
+        final_hidden_states = self.moe_mlp(hidden_states, routing_weights, selected_experts)
+        check_vals(final_hidden_states)
+        final_hidden_states = final_hidden_states.view(batch_size, sequence_length, hidden_dim)
+        return final_hidden_states, router_logits
+
+    def forward(self, hidden_states: torch.Tensor):
+        orig_input = hidden_states
+        orig_out, _ = self.original(hidden_states)
+        final_hidden_states, router_logits = self._forward(hidden_states)
+        diff = torch.abs(orig_out - final_hidden_states)
+        thresh = 0.08
+        print("max diff:", diff.max())
+        if False and diff.max() > thresh:
+            print("Compare with previous save:")
+            hs = torch.load("../scattermoe/examples/input_example.pt", map_location='cpu')['hidden_states']
+            print("hs max diff:", torch.abs(orig_input.cpu() - hs).max())
+            torch.save({
+                "hidden_states": orig_input,
+                "state_dict": self.state_dict()
+            }, "../scattermoe/examples/input_example.pt")
+            mask = diff > thresh
+            import pdb; pdb.set_trace()
+            
+        return final_hidden_states, router_logits
+
 
 
 def _get_accelerate_args(
@@ -72,7 +132,7 @@ def _get_accelerate_args(
 class HFLM(TemplateLM):
     """
     An abstracted Huggingface model class. Enables usage with both models of
-    `MixtralForCausalLM` and `transformers.AutoModelForSeq2SeqLM` classes.
+    `transformers.AutoModelForCausalLM` and `transformers.AutoModelForSeq2SeqLM` classes.
 
     Supports data-parallel multi-GPU with HF Accelerate.
     """
@@ -139,7 +199,7 @@ class HFLM(TemplateLM):
                 # Get tokenizer
                 model_name = self._model.name_or_path
                 self.tokenizer = transformers.AutoTokenizer.from_pretrained(
-                    "mistralai/Mixtral-8x7B-v0.1", # model_name,
+                    model_name,
                     revision=revision,
                     trust_remote_code=trust_remote_code,
                     use_fast=use_fast_tokenizer,
@@ -429,7 +489,7 @@ class HFLM(TemplateLM):
         if backend != "default":
             # if we've settled on non-default backend, use that manually
             if backend == "causal":
-                self.AUTO_MODEL_CLASS = MixtralForCausalLM
+                self.AUTO_MODEL_CLASS = transformers.AutoModelForCausalLM
             elif backend == "seq2seq":
                 self.AUTO_MODEL_CLASS = transformers.AutoModelForSeq2SeqLM
             eval_logger.info(
@@ -448,7 +508,7 @@ class HFLM(TemplateLM):
             elif (
                 getattr(self.config, "model_type") in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES
             ):
-                self.AUTO_MODEL_CLASS = MixtralForCausalLM
+                self.AUTO_MODEL_CLASS = transformers.AutoModelForCausalLM
             else:
                 if not trust_remote_code:
                     eval_logger.warning(
@@ -457,7 +517,12 @@ class HFLM(TemplateLM):
                     )
                 # if model type is neither in HF transformers causal or seq2seq model registries
                 # then we default to AutoModelForCausalLM
-                self.AUTO_MODEL_CLASS = MixtralForCausalLM
+                self.AUTO_MODEL_CLASS = transformers.AutoModelForCausalLM
+
+        assert self.AUTO_MODEL_CLASS in [
+            transformers.AutoModelForCausalLM,
+            transformers.AutoModelForSeq2SeqLM,
+        ]
         return None
 
     def _get_config(
@@ -466,7 +531,7 @@ class HFLM(TemplateLM):
         revision: str = "main",
         trust_remote_code: bool = False,
     ) -> None:
-        self._config = MixtralConfig.from_pretrained(
+        self._config = transformers.AutoConfig.from_pretrained(
             pretrained,
             revision=revision,
             trust_remote_code=trust_remote_code,
@@ -545,6 +610,35 @@ class HFLM(TemplateLM):
                 **model_kwargs,
             )
 
+            num_experts = self._config.num_local_experts
+            for layer in range(len(self._model.model.layers)):
+                mlp_orig = self._model.model.layers[layer].block_sparse_moe
+                device = mlp_orig.gate.weight.device
+                print("Layer", layer, "device", device)
+                mlp = MixtralSparseMoeBlock(self._config)
+                state_dict_orig = mlp_orig.state_dict()
+                for n, p in mlp.named_parameters():
+                    if n in state_dict_orig:
+                        p.data[:] = state_dict_orig.pop(n)
+                    else:
+                        _, suffix = n.split('moe_mlp')
+                        for i in range(num_experts):
+                            if suffix == ".output_experts.weight":
+                                w2_param_name = "experts.%d.w2.weight" % i
+                                p.data[i, :, :] = state_dict_orig.pop(w2_param_name)
+                                print(w2_param_name, "->", n)
+                            else:
+                                w1_param_name = "experts.%d.w1.weight" % i
+                                w3_param_name = "experts.%d.w3.weight" % i
+                                out_dim, in_dim = state_dict_orig[w1_param_name].size()
+                                p.data[i, :out_dim, :] = state_dict_orig.pop(w3_param_name)
+                                p.data[i, out_dim:, :] = state_dict_orig.pop(w1_param_name)
+                                print(w1_param_name, w3_param_name, "->", n)
+                self._model.model.layers[layer].block_sparse_moe = mlp.to(device)
+                print(state_dict_orig)
+                mlp.original = mlp_orig
+
+
         else:
             try:
                 from auto_gptq import AutoGPTQForCausalLM
@@ -598,7 +692,7 @@ class HFLM(TemplateLM):
         if tokenizer:
             if isinstance(tokenizer, str):
                 self.tokenizer = transformers.AutoTokenizer.from_pretrained(
-                    "mistralai/Mixtral-8x7B-v0.1", # tokenizer,
+                    tokenizer,
                     revision=revision,
                     trust_remote_code=trust_remote_code,
                     use_fast=use_fast_tokenizer,
@@ -616,7 +710,7 @@ class HFLM(TemplateLM):
                 # get the HF hub name via accessor on model
                 model_name = self.model.name_or_path
             self.tokenizer = transformers.AutoTokenizer.from_pretrained(
-                "mistralai/Mixtral-8x7B-v0.1", # model_name,
+                model_name,
                 revision=revision,
                 trust_remote_code=trust_remote_code,
                 use_fast=use_fast_tokenizer,
@@ -688,7 +782,7 @@ class HFLM(TemplateLM):
 
         # by default for CausalLM - false or self.add_bos_token is set
         if add_special_tokens is None:
-            if self.AUTO_MODEL_CLASS == MixtralForCausalLM:
+            if self.AUTO_MODEL_CLASS == transformers.AutoModelForCausalLM:
                 special_tokens_kwargs = {
                     "add_special_tokens": False or self.add_bos_token
                 }
@@ -716,7 +810,7 @@ class HFLM(TemplateLM):
         self.tokenizer.padding_side = padding_side
 
         add_special_tokens = {}
-        if self.AUTO_MODEL_CLASS == MixtralForCausalLM:
+        if self.AUTO_MODEL_CLASS == transformers.AutoModelForCausalLM:
             add_special_tokens = {"add_special_tokens": False or self.add_bos_token}
 
         encoding = self.tokenizer(
@@ -761,7 +855,7 @@ class HFLM(TemplateLM):
                     input_ids=inps, attention_mask=attn_mask, labels=labels
                 ).logits
             else:
-                assert self.AUTO_MODEL_CLASS == MixtralForCausalLM
+                assert self.AUTO_MODEL_CLASS == transformers.AutoModelForCausalLM
                 return self.model(inps).logits
 
     def _model_generate(self, context, max_length, stop, **generation_kwargs):
@@ -794,7 +888,7 @@ class HFLM(TemplateLM):
     def _select_cont_toks(
         self, logits: torch.Tensor, contlen: int = None, inplen: int = None
     ) -> torch.Tensor:
-        if self.AUTO_MODEL_CLASS == MixtralForCausalLM:
+        if self.AUTO_MODEL_CLASS == transformers.AutoModelForCausalLM:
             assert (
                 contlen and inplen
             ), "Must pass input len and cont. len to select scored logits for causal LM"
@@ -921,7 +1015,7 @@ class HFLM(TemplateLM):
             requests,
             sort_fn=_collate,
             group_by="contexts"
-            if self.AUTO_MODEL_CLASS == MixtralForCausalLM
+            if self.AUTO_MODEL_CLASS == transformers.AutoModelForCausalLM
             and self.logits_cache
             else None,
             group_fn=_lookup_one_token_cont,
@@ -979,7 +1073,7 @@ class HFLM(TemplateLM):
                 # cont_toks      4 5 6 7 8 9      [:, -len(continuation_enc):, :self.vocab_size] slice
 
                 # when too long to fit in context, truncate from the left
-                if self.AUTO_MODEL_CLASS == MixtralForCausalLM:
+                if self.AUTO_MODEL_CLASS == transformers.AutoModelForCausalLM:
                     inp = torch.tensor(
                         (context_enc + continuation_enc)[-(self.max_length + 1) :][:-1],
                         dtype=torch.long,
@@ -1026,7 +1120,7 @@ class HFLM(TemplateLM):
 
             # create encoder attn mask and batched conts, if seq2seq
             call_kwargs = {}
-            if self.AUTO_MODEL_CLASS == MixtralForCausalLM:
+            if self.AUTO_MODEL_CLASS == transformers.AutoModelForCausalLM:
                 batched_inps = pad_and_concat(
                     padding_len_inp, inps, padding_side="right"
                 )  # [batch, padding_len_inp]
@@ -1061,7 +1155,7 @@ class HFLM(TemplateLM):
                 # from prompt/prefix tuning tokens, if applicable
                 ctx_len = (
                     inplen + (logits.shape[0] - padding_len_inp)
-                    if self.AUTO_MODEL_CLASS == MixtralForCausalLM
+                    if self.AUTO_MODEL_CLASS == transformers.AutoModelForCausalLM
                     else None
                 )
                 logits = self._select_cont_toks(logits, contlen=contlen, inplen=ctx_len)
@@ -1190,7 +1284,7 @@ class HFLM(TemplateLM):
                 max_gen_toks = self.max_gen_toks
 
             # set the max length in tokens of inputs ("context_enc")
-            if self.AUTO_MODEL_CLASS == MixtralForCausalLM:
+            if self.AUTO_MODEL_CLASS == transformers.AutoModelForCausalLM:
                 # max len for inputs = max length, minus room to generate the max new tokens
                 max_ctx_len = self.max_length - max_gen_toks
             elif self.AUTO_MODEL_CLASS == transformers.AutoModelForSeq2SeqLM:
@@ -1220,7 +1314,7 @@ class HFLM(TemplateLM):
             cont_toks_list = cont.tolist()
             for cont_toks, context in zip(cont_toks_list, contexts):
                 # discard context + left-padding toks if using causal decoder-only LM
-                if self.AUTO_MODEL_CLASS == MixtralForCausalLM:
+                if self.AUTO_MODEL_CLASS == transformers.AutoModelForCausalLM:
                     cont_toks = cont_toks[context_enc.shape[1] :]
 
                 s = self.tok_decode(cont_toks)

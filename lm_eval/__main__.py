@@ -360,7 +360,7 @@ def cli_evaluate(args: Union[argparse.Namespace, None] = None) -> None:
         torch_random_seed=args.seed[2],
         **request_caching_args,
     )
-
+    eval_logger.info("Eval done.")
     if results is not None:
         if args.log_samples:
             samples = results.pop("samples")
@@ -406,7 +406,7 @@ def cli_evaluate(args: Union[argparse.Namespace, None] = None) -> None:
         print(make_table(results))
         if "groups" in results:
             print(make_table(results, "groups"))
-
+        
         if args.wandb_args:
             # Tear down wandb run once all the logging is done.
             wandb_logger.run.finish()
