@@ -552,18 +552,24 @@ class HFLM(TemplateLM):
                         model_kwargs["bnb_4bit_compute_dtype"] = get_dtype(
                             model_kwargs["bnb_4bit_compute_dtype"]
                         )
-            """
-            self._model = self.AUTO_MODEL_CLASS.from_pretrained(
-                pretrained,
-                revision=revision,
-                torch_dtype=get_dtype(dtype),
-                trust_remote_code=trust_remote_code,
-                **model_kwargs,
+
+            self._config = LlamaConfig.from_pretrained(
+                MODEL_NAME,
+                torch_dtype=torch.bfloat16,
+                low_cpu_mem_usage=True,
+                **model_kwargs
             )
-            """
-            self._model = LlamaForCausalLM(self._config)
+            self._config.n_attention_heads = 16 # config.model.n_head
+            self._config.num_key_value_heads = 16 # config.model.n_head
+            self._config.intermediate_size = 2730 # config.model.ffd_hidden
+            self._config.hidden_size = 1024 # config.model.n_embd
+            self._config.num_hidden_layers = 24 # config.model.n_layer
+
+            self._model = LlamaForCausalLM(self._config).to(self.device)
             state_dict = torch.load("%s/checkpoint/latest.pt/pytorch_model.bin" % pretrained)
             self._model.load_state_dict(state_dict)
+            print(self._model.model.embed_tokens.weight.device)
+            # self._model.model.embed_tokens.weight.to(torch.device('cuda:0'))
 
 
         else:
