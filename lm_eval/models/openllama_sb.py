@@ -1045,6 +1045,7 @@ class HFLM(TemplateLM):
             # create encoder attn mask and batched conts, if seq2seq
             call_kwargs = {}
             if self.AUTO_MODEL_CLASS == LlamaForCausalLM:
+                print(inps.size(), padding_len_inp)
                 batched_inps = pad_and_concat(
                     padding_len_inp, inps, padding_side="right"
                 )  # [batch, padding_len_inp]
