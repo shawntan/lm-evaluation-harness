@@ -35,8 +35,8 @@ from lm_eval.models.utils import (
 )
 import sys
 sys.path.insert(1, '/workspace/shawntan/SparseGPT/')
-import llama
-from llama.modeling_llama import LlamaModel, LlamaForCausalLM, LlamaConfig
+import llama_sb as llama
+from llama_sb.modeling_llama import LlamaModel, LlamaForCausalLM, LlamaConfig
 from preprocess_data import load_tokenizer, preprocess_data
 
 
