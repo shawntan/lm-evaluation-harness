@@ -978,6 +978,7 @@ class HFLM(TemplateLM):
             encoder_attns = []
 
             padding_len_inp = None
+            # padding_len_inp = self.max_length
             padding_len_cont = None
             # because vectorizing is annoying, we first convert each (context, continuation) pair to padded
             # tensors, then we pack them together into a batch, call the model, and then pick it all apart
@@ -1045,10 +1046,11 @@ class HFLM(TemplateLM):
             # create encoder attn mask and batched conts, if seq2seq
             call_kwargs = {}
             if self.AUTO_MODEL_CLASS == LlamaForCausalLM:
-                print(inps.size(), padding_len_inp)
+                print(inps[0].size(), padding_len_inp)
                 batched_inps = pad_and_concat(
                     padding_len_inp, inps, padding_side="right"
                 )  # [batch, padding_len_inp]
+                print(batched_inps.size())
             elif self.AUTO_MODEL_CLASS == transformers.AutoModelForSeq2SeqLM:
                 # TODO: left-pad encoder inps and mask?
                 batched_inps = pad_and_concat(
