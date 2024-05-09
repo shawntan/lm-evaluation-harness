@@ -478,10 +478,6 @@ class HFLM(TemplateLM):
             torch_dtype=torch.bfloat16,
             low_cpu_mem_usage=True,
         )
-        self._config.num_attention_heads = 32 # config.model.n_head
-        self._config.num_key_value_heads = 32 # config.model.n_head
-        self._config.intermediate_size = 5462 # config.model.ffd_hidden
-        self._config.hidden_size = 2048 # config.model.n_embd
         self._config.num_hidden_layers = 24 # config.model.n_layer
 
 
@@ -557,7 +553,6 @@ class HFLM(TemplateLM):
                 del model_kwargs['ntk']
             else:
                 ntk_scaling = False
-
             self._config = LlamaConfig.from_pretrained(
                 MODEL_NAME,
                 torch_dtype=torch.bfloat16,

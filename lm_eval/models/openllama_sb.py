@@ -478,10 +478,6 @@ class HFLM(TemplateLM):
             torch_dtype=torch.bfloat16,
             low_cpu_mem_usage=True,
         )
-        self._config.n_attention_heads = 16 # config.model.n_head
-        self._config.num_key_value_heads = 16 # config.model.n_head
-        self._config.intermediate_size = 2730 # config.model.ffd_hidden
-        self._config.hidden_size = 1024 # config.model.n_embd
         self._config.num_hidden_layers = 24 # config.model.n_layer
 
 
@@ -559,11 +555,6 @@ class HFLM(TemplateLM):
                 low_cpu_mem_usage=True,
                 **model_kwargs
             )
-            self._config.n_attention_heads = 16 # config.model.n_head
-            self._config.num_key_value_heads = 16 # config.model.n_head
-            self._config.intermediate_size = 2730 # config.model.ffd_hidden
-            self._config.hidden_size = 1024 # config.model.n_embd
-            self._config.num_hidden_layers = 24 # config.model.n_layer
 
             self._model = LlamaForCausalLM(self._config).to(self.device)
             state_dict = torch.load("%s/checkpoint/latest.pt/pytorch_model.bin" % pretrained)
