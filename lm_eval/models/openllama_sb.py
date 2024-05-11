@@ -36,7 +36,6 @@ from lm_eval.models.utils import (
 import sys
 sys.path.insert(1, '/workspace/shawntan/SparseGPT/')
 import importlib
-from preprocess_data import load_tokenizer, preprocess_data
 
 
 eval_logger = utils.eval_logger
@@ -428,14 +427,14 @@ class HFLM(TemplateLM):
         assert backend in ["default", "causal", "seq2seq"]
 
         modeling_llama = importlib.import_module('llama_sb.modeling_llama')
-        from modeling_llama import LlamaForCausalLM, LlamaConfig
-        self.causal_lm_class = LlamaForCausalLM
-        self.model_config_class = LlamaConfig
+        # from modeling_llama import LlamaForCausalLM, LlamaConfig
+        self.causal_lm_class = modeling_llama.LlamaForCausalLM
+        self.model_config_class = modeling_llama.LlamaConfig
         
         if backend != "default":
             # if we've settled on non-default backend, use that manually
             if backend == "causal":
-                self.AUTO_MODEL_CLASS = LlamaForCausalLM
+                self.AUTO_MODEL_CLASS = self.causal_lm_class # LlamaForCausalLM
             elif backend == "seq2seq":
                 self.AUTO_MODEL_CLASS = transformers.AutoModelForSeq2SeqLM
             eval_logger.info(
@@ -454,7 +453,7 @@ class HFLM(TemplateLM):
             elif (
                 getattr(self.config, "model_type") in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES
             ):
-                self.AUTO_MODEL_CLASS = LlamaForCausalLM
+                self.AUTO_MODEL_CLASS = self.causal_lm_class
             else:
                 if not trust_remote_code:
                     eval_logger.warning(
@@ -463,7 +462,7 @@ class HFLM(TemplateLM):
                     )
                 # if model type is neither in HF transformers causal or seq2seq model registries
                 # then we default to AutoModelForCausalLM
-                self.AUTO_MODEL_CLASS = LlamaForCausalLM
+                self.AUTO_MODEL_CLASS = self.causal_lm_class
         return None
 
     def _get_config(
@@ -555,7 +554,7 @@ class HFLM(TemplateLM):
                             model_kwargs["bnb_4bit_compute_dtype"]
                         )
 
-            self._config = LlamaConfig.from_pretrained(
+            self._config = self.model_config_class.from_pretrained(
                 MODEL_NAME,
                 torch_dtype=torch.bfloat16,
                 low_cpu_mem_usage=True,
@@ -1086,7 +1085,7 @@ class HFLM(TemplateLM):
                 # from prompt/prefix tuning tokens, if applicable
                 ctx_len = (
                     inplen + (logits.shape[0] - padding_len_inp)
-                    if self.AUTO_MODEL_CLASS == LlamaForCausalLM
+                    if self.AUTO_MODEL_CLASS == self.causal_lm_class
                     else None
                 )
                 logits = self._select_cont_toks(logits, contlen=contlen, inplen=ctx_len)
@@ -1215,7 +1214,7 @@ class HFLM(TemplateLM):
                 max_gen_toks = self.max_gen_toks
 
             # set the max length in tokens of inputs ("context_enc")
-            if self.AUTO_MODEL_CLASS == LlamaForCausalLM:
+            if self.AUTO_MODEL_CLASS == self.causal_lm_class:
                 # max len for inputs = max length, minus room to generate the max new tokens
                 max_ctx_len = self.max_length - max_gen_toks
             elif self.AUTO_MODEL_CLASS == transformers.AutoModelForSeq2SeqLM:
@@ -1245,7 +1244,7 @@ class HFLM(TemplateLM):
             cont_toks_list = cont.tolist()
             for cont_toks, context in zip(cont_toks_list, contexts):
                 # discard context + left-padding toks if using causal decoder-only LM
-                if self.AUTO_MODEL_CLASS == LlamaForCausalLM:
+                if self.AUTO_MODEL_CLASS == self.causal_lm_class:
                     cont_toks = cont_toks[context_enc.shape[1] :]
 
                 s = self.tok_decode(cont_toks)
