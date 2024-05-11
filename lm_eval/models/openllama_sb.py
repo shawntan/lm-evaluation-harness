@@ -430,6 +430,11 @@ class HFLM(TemplateLM):
         model type to be used.
         """
         assert backend in ["default", "causal", "seq2seq"]
+
+        modeling_llama = importlib.import_module('llama_sb.modeling_llama')
+        # from modeling_llama import LlamaForCausalLM, LlamaConfig
+        self.causal_lm_class = modeling_llama.LlamaForCausalLM
+        self.model_config_class = modeling_llama.LlamaConfig
         if backend != "default":
             # if we've settled on non-default backend, use that manually
             if backend == "causal":
