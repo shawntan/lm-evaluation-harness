@@ -35,7 +35,9 @@ from lm_eval.models.utils import (
 )
 import sys
 sys.path.insert(1, '/workspace/shawntan/SparseGPT/')
-import importlib
+import llama
+from transformers.models.llama.modeling_llama import LlamaModel, LlamaForCausalLM, LlamaConfig
+from preprocess_data import load_tokenizer, preprocess_data
 
 
 eval_logger = utils.eval_logger
@@ -66,7 +68,7 @@ def _get_accelerate_args(
     return args
 
 
-@register_model("openllama_sb")
+@register_model("openllama")
 class HFLM(TemplateLM):
     """
     An abstracted Huggingface model class. Enables usage with both models of
@@ -113,15 +115,9 @@ class HFLM(TemplateLM):
         # PEFT and quantization options
         peft: Optional[str] = None,
         autogptq: Optional[Union[bool, str]] = False,
-        class_name: str = "llama_sb",
         **kwargs,
     ) -> None:
         super().__init__()
-
-        modeling_llama = importlib.import_module('%s.modeling_llama' % class_name)
-        # from modeling_llama import LlamaForCausalLM, LlamaConfig
-        self.causal_lm_class = modeling_llama.LlamaForCausalLM
-        self.model_config_class = modeling_llama.LlamaConfig
 
         # optionally: take in an already-initialized transformers.PreTrainedModel
         if not isinstance(pretrained, str):
@@ -130,7 +126,6 @@ class HFLM(TemplateLM):
             )
             assert not parallelize, "`parallelize=True` is not compatible with passing pre-initialized model to `pretrained`"
             self._model = pretrained
-            self._class_name = class_name
             self._device = self._model.device
             self._config = self._model.config
             gpus = 0
@@ -430,10 +425,11 @@ class HFLM(TemplateLM):
         model type to be used.
         """
         assert backend in ["default", "causal", "seq2seq"]
+
         if backend != "default":
             # if we've settled on non-default backend, use that manually
             if backend == "causal":
-                self.AUTO_MODEL_CLASS = self.causal_lm_class # LlamaForCausalLM
+                self.AUTO_MODEL_CLASS = LlamaForCausalLM
             elif backend == "seq2seq":
                 self.AUTO_MODEL_CLASS = transformers.AutoModelForSeq2SeqLM
             eval_logger.info(
@@ -452,7 +448,7 @@ class HFLM(TemplateLM):
             elif (
                 getattr(self.config, "model_type") in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES
             ):
-                self.AUTO_MODEL_CLASS = self.causal_lm_class
+                self.AUTO_MODEL_CLASS = LlamaForCausalLM
             else:
                 if not trust_remote_code:
                     eval_logger.warning(
@@ -461,7 +457,7 @@ class HFLM(TemplateLM):
                     )
                 # if model type is neither in HF transformers causal or seq2seq model registries
                 # then we default to AutoModelForCausalLM
-                self.AUTO_MODEL_CLASS = self.causal_lm_class
+                self.AUTO_MODEL_CLASS = LlamaForCausalLM
         return None
 
     def _get_config(
@@ -477,7 +473,7 @@ class HFLM(TemplateLM):
             trust_remote_code=trust_remote_code,
         )
         """
-        self._config = self.model_config_class.from_pretrained(
+        self._config = LlamaConfig.from_pretrained(
             MODEL_NAME,
             torch_dtype=torch.bfloat16,
             low_cpu_mem_usage=True,
@@ -552,15 +548,29 @@ class HFLM(TemplateLM):
                         model_kwargs["bnb_4bit_compute_dtype"] = get_dtype(
                             model_kwargs["bnb_4bit_compute_dtype"]
                         )
-
-            self._config = self.model_config_class.from_pretrained(
+            if "ntk" in model_kwargs:
+                ntk_scaling = model_kwargs['ntk']
+                del model_kwargs['ntk']
+            else:
+                ntk_scaling = False
+            self._config = LlamaConfig.from_pretrained(
                 MODEL_NAME,
                 torch_dtype=torch.bfloat16,
                 low_cpu_mem_usage=True,
                 **model_kwargs
             )
+            if ntk_scaling:
+                self._config.rope_scaling = {"type": "dynamic", "factor": 1.0}
+            """
+            self._config.num_attention_heads = 32 # config.model.n_head
+            self._config.num_key_value_heads = 32 # config.model.n_head
+            self._config.intermediate_size = 5462 # config.model.ffd_hidden
+            self._config.hidden_size = 2048 # config.model.n_embd
+            self._config.num_hidden_layers = 24 # config.model.n_layer
+            self._config.max_position_embeddings = 8192
+            """
 
-            self._model = self.AUTO_MODEL_CLASS(self._config).to(self.device)
+            self._model = LlamaForCausalLM(self._config).to(self.device)
             state_dict = torch.load("%s/checkpoint/latest.pt/pytorch_model.bin" % pretrained)
             self._model.load_state_dict(state_dict)
             print(self._model.model.embed_tokens.weight.device)
@@ -710,7 +720,7 @@ class HFLM(TemplateLM):
 
         # by default for CausalLM - false or self.add_bos_token is set
         if add_special_tokens is None:
-            if self.AUTO_MODEL_CLASS == self.causal_lm_class:
+            if self.AUTO_MODEL_CLASS == LlamaForCausalLM:
                 special_tokens_kwargs = {
                     "add_special_tokens": False or self.add_bos_token
                 }
@@ -738,7 +748,7 @@ class HFLM(TemplateLM):
         self.tokenizer.padding_side = padding_side
 
         add_special_tokens = {}
-        if self.AUTO_MODEL_CLASS == self.causal_lm_class:
+        if self.AUTO_MODEL_CLASS == LlamaForCausalLM:
             add_special_tokens = {"add_special_tokens": False or self.add_bos_token}
 
         encoding = self.tokenizer(
@@ -783,7 +793,7 @@ class HFLM(TemplateLM):
                     input_ids=inps, attention_mask=attn_mask, labels=labels
                 ).logits
             else:
-                assert self.AUTO_MODEL_CLASS == self.causal_lm_class 
+                assert self.AUTO_MODEL_CLASS == LlamaForCausalLM
                 return self.model(inps).logits
 
     def _model_generate(self, context, max_length, stop, **generation_kwargs):
@@ -816,7 +826,7 @@ class HFLM(TemplateLM):
     def _select_cont_toks(
         self, logits: torch.Tensor, contlen: int = None, inplen: int = None
     ) -> torch.Tensor:
-        if self.AUTO_MODEL_CLASS == self.causal_lm_class:
+        if self.AUTO_MODEL_CLASS == LlamaForCausalLM:
             assert (
                 contlen and inplen
             ), "Must pass input len and cont. len to select scored logits for causal LM"
@@ -943,7 +953,7 @@ class HFLM(TemplateLM):
             requests,
             sort_fn=_collate,
             group_by="contexts"
-            if self.AUTO_MODEL_CLASS == self.causal_lm_class 
+            if self.AUTO_MODEL_CLASS == LlamaForCausalLM
             and self.logits_cache
             else None,
             group_fn=_lookup_one_token_cont,
@@ -981,8 +991,6 @@ class HFLM(TemplateLM):
             conts = []
             encoder_attns = []
 
-            # padding_len_inp = None
-            # padding_len_inp = self.max_length
             padding_len_inp = None
             padding_len_cont = None
             # because vectorizing is annoying, we first convert each (context, continuation) pair to padded
@@ -1003,7 +1011,7 @@ class HFLM(TemplateLM):
                 # cont_toks      4 5 6 7 8 9      [:, -len(continuation_enc):, :self.vocab_size] slice
 
                 # when too long to fit in context, truncate from the left
-                if self.AUTO_MODEL_CLASS == self.causal_lm_class:
+                if self.AUTO_MODEL_CLASS == LlamaForCausalLM:
                     inp = torch.tensor(
                         (context_enc + continuation_enc)[-(self.max_length + 1) :][:-1],
                         dtype=torch.long,
@@ -1043,13 +1051,14 @@ class HFLM(TemplateLM):
                     if padding_len_inp is not None
                     else inplen
                 )
+
                 inps.append(inp)  # [1, inp_length]
                 cont_toks_list.append(continuation_enc)
                 inplens.append(inplen)
-            padding_len_inp = 128 * (((padding_len_inp - 1) // 128) + 1)
+
             # create encoder attn mask and batched conts, if seq2seq
             call_kwargs = {}
-            if self.AUTO_MODEL_CLASS == self.causal_lm_class:
+            if self.AUTO_MODEL_CLASS == LlamaForCausalLM:
                 batched_inps = pad_and_concat(
                     padding_len_inp, inps, padding_side="right"
                 )  # [batch, padding_len_inp]
@@ -1084,7 +1093,7 @@ class HFLM(TemplateLM):
                 # from prompt/prefix tuning tokens, if applicable
                 ctx_len = (
                     inplen + (logits.shape[0] - padding_len_inp)
-                    if self.AUTO_MODEL_CLASS == self.causal_lm_class
+                    if self.AUTO_MODEL_CLASS == LlamaForCausalLM
                     else None
                 )
                 logits = self._select_cont_toks(logits, contlen=contlen, inplen=ctx_len)
@@ -1213,7 +1222,7 @@ class HFLM(TemplateLM):
                 max_gen_toks = self.max_gen_toks
 
             # set the max length in tokens of inputs ("context_enc")
-            if self.AUTO_MODEL_CLASS == self.causal_lm_class:
+            if self.AUTO_MODEL_CLASS == LlamaForCausalLM:
                 # max len for inputs = max length, minus room to generate the max new tokens
                 max_ctx_len = self.max_length - max_gen_toks
             elif self.AUTO_MODEL_CLASS == transformers.AutoModelForSeq2SeqLM:
@@ -1243,7 +1252,7 @@ class HFLM(TemplateLM):
             cont_toks_list = cont.tolist()
             for cont_toks, context in zip(cont_toks_list, contexts):
                 # discard context + left-padding toks if using causal decoder-only LM
-                if self.AUTO_MODEL_CLASS == self.causal_lm_class:
+                if self.AUTO_MODEL_CLASS == LlamaForCausalLM:
                     cont_toks = cont_toks[context_enc.shape[1] :]
 
                 s = self.tok_decode(cont_toks)
