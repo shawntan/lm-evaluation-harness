@@ -35,8 +35,7 @@ from lm_eval.models.utils import (
 )
 import sys
 sys.path.insert(1, '/workspace/shawntan/SparseGPT/')
-import llama_sb as llama
-from llama_sb.modeling_llama import LlamaModel, LlamaForCausalLM, LlamaConfig
+import importlib
 from preprocess_data import load_tokenizer, preprocess_data
 
 
@@ -115,6 +114,7 @@ class HFLM(TemplateLM):
         # PEFT and quantization options
         peft: Optional[str] = None,
         autogptq: Optional[Union[bool, str]] = False,
+        class_name: str = "llama_sb"
         **kwargs,
     ) -> None:
         super().__init__()
@@ -126,6 +126,7 @@ class HFLM(TemplateLM):
             )
             assert not parallelize, "`parallelize=True` is not compatible with passing pre-initialized model to `pretrained`"
             self._model = pretrained
+            self._class_name = class_name
             self._device = self._model.device
             self._config = self._model.config
             gpus = 0
@@ -426,6 +427,11 @@ class HFLM(TemplateLM):
         """
         assert backend in ["default", "causal", "seq2seq"]
 
+        modeling_llama = importlib.import_module('llama_sb.modeling_llama')
+        from modeling_llama import LlamaForCausalLM, LlamaConfig
+        self.causal_lm_class = LlamaForCausalLM
+        self.model_config_class = LlamaConfig
+        
         if backend != "default":
             # if we've settled on non-default backend, use that manually
             if backend == "causal":
@@ -556,7 +562,7 @@ class HFLM(TemplateLM):
                 **model_kwargs
             )
 
-            self._model = LlamaForCausalLM(self._config).to(self.device)
+            self._model = self.AUTO_MODEL_CLASS(self._config).to(self.device)
             state_dict = torch.load("%s/checkpoint/latest.pt/pytorch_model.bin" % pretrained)
             self._model.load_state_dict(state_dict)
             print(self._model.model.embed_tokens.weight.device)
@@ -706,7 +712,7 @@ class HFLM(TemplateLM):
 
         # by default for CausalLM - false or self.add_bos_token is set
         if add_special_tokens is None:
-            if self.AUTO_MODEL_CLASS == LlamaForCausalLM:
+            if self.AUTO_MODEL_CLASS == self.causal_lm_class:
                 special_tokens_kwargs = {
                     "add_special_tokens": False or self.add_bos_token
                 }
@@ -734,7 +740,7 @@ class HFLM(TemplateLM):
         self.tokenizer.padding_side = padding_side
 
         add_special_tokens = {}
-        if self.AUTO_MODEL_CLASS == LlamaForCausalLM:
+        if self.AUTO_MODEL_CLASS == self.causal_lm_class:
             add_special_tokens = {"add_special_tokens": False or self.add_bos_token}
 
         encoding = self.tokenizer(
@@ -779,7 +785,7 @@ class HFLM(TemplateLM):
                     input_ids=inps, attention_mask=attn_mask, labels=labels
                 ).logits
             else:
-                assert self.AUTO_MODEL_CLASS == LlamaForCausalLM
+                assert self.AUTO_MODEL_CLASS == self.causal_lm_class 
                 return self.model(inps).logits
 
     def _model_generate(self, context, max_length, stop, **generation_kwargs):
@@ -812,7 +818,7 @@ class HFLM(TemplateLM):
     def _select_cont_toks(
         self, logits: torch.Tensor, contlen: int = None, inplen: int = None
     ) -> torch.Tensor:
-        if self.AUTO_MODEL_CLASS == LlamaForCausalLM:
+        if self.AUTO_MODEL_CLASS == self.causal_lm_class:
             assert (
                 contlen and inplen
             ), "Must pass input len and cont. len to select scored logits for causal LM"
@@ -939,7 +945,7 @@ class HFLM(TemplateLM):
             requests,
             sort_fn=_collate,
             group_by="contexts"
-            if self.AUTO_MODEL_CLASS == LlamaForCausalLM
+            if self.AUTO_MODEL_CLASS == self.causal_lm_class 
             and self.logits_cache
             else None,
             group_fn=_lookup_one_token_cont,
@@ -999,7 +1005,7 @@ class HFLM(TemplateLM):
                 # cont_toks      4 5 6 7 8 9      [:, -len(continuation_enc):, :self.vocab_size] slice
 
                 # when too long to fit in context, truncate from the left
-                if self.AUTO_MODEL_CLASS == LlamaForCausalLM:
+                if self.AUTO_MODEL_CLASS == self.causal_lm_class:
                     inp = torch.tensor(
                         (context_enc + continuation_enc)[-(self.max_length + 1) :][:-1],
                         dtype=torch.long,
@@ -1045,7 +1051,7 @@ class HFLM(TemplateLM):
             padding_len_inp = 128 * (((padding_len_inp - 1) // 128) + 1)
             # create encoder attn mask and batched conts, if seq2seq
             call_kwargs = {}
-            if self.AUTO_MODEL_CLASS == LlamaForCausalLM:
+            if self.AUTO_MODEL_CLASS == self.causal_lm_class:
                 batched_inps = pad_and_concat(
                     padding_len_inp, inps, padding_side="right"
                 )  # [batch, padding_len_inp]
