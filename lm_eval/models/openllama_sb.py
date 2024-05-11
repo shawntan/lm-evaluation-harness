@@ -119,6 +119,7 @@ class HFLM(TemplateLM):
         super().__init__()
 
         modeling_llama = importlib.import_module('%s.modeling_llama' % class_name)
+        print(modeling_llama.__file__)
         # from modeling_llama import LlamaForCausalLM, LlamaConfig
         self.causal_lm_class = modeling_llama.LlamaForCausalLM
         self.model_config_class = modeling_llama.LlamaConfig
@@ -430,11 +431,6 @@ class HFLM(TemplateLM):
         model type to be used.
         """
         assert backend in ["default", "causal", "seq2seq"]
-
-        modeling_llama = importlib.import_module('llama_sb.modeling_llama')
-        # from modeling_llama import LlamaForCausalLM, LlamaConfig
-        self.causal_lm_class = modeling_llama.LlamaForCausalLM
-        self.model_config_class = modeling_llama.LlamaConfig
         if backend != "default":
             # if we've settled on non-default backend, use that manually
             if backend == "causal":
@@ -566,6 +562,8 @@ class HFLM(TemplateLM):
             )
 
             self._model = self.AUTO_MODEL_CLASS(self._config).to(self.device)
+            import inspect
+            print(inspect.getfile(self._model.__class__))
             state_dict = torch.load("%s/checkpoint/latest.pt/pytorch_model.bin" % pretrained)
             self._model.load_state_dict(state_dict)
             print(self._model.model.embed_tokens.weight.device)
