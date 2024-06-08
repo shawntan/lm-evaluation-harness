@@ -1071,7 +1071,7 @@ class HFLM(TemplateLM):
                     "attn_mask": batched_encoder_mask,
                     "labels": batched_conts,
                 }
-
+            # print(self.tok_decode(batched_inps[0]))
             multi_logits = F.log_softmax(
                 self._model_call(batched_inps, **call_kwargs), dim=-1
             )  # [batch, padding_length (inp or cont), vocab]
@@ -1117,7 +1117,8 @@ class HFLM(TemplateLM):
                     logits = torch.gather(logits, 2, cont_toks.unsqueeze(-1)).squeeze(
                         -1
                     )  # [1, seq]
-
+                    # print(logits.size())
+                    # print(logits.sum())
                     # Answer: (log prob, is-exact-match)
                     answer = (float(logits.sum()), bool(max_equal))
 

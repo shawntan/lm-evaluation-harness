@@ -1055,7 +1055,7 @@ class HFLM(TemplateLM):
                 inps.append(inp)  # [1, inp_length]
                 cont_toks_list.append(continuation_enc)
                 inplens.append(inplen)
-
+            padding_len_inp = 128 * (((padding_len_inp - 1) // 128) + 1)
             # create encoder attn mask and batched conts, if seq2seq
             call_kwargs = {}
             if self.AUTO_MODEL_CLASS == LlamaForCausalLM:

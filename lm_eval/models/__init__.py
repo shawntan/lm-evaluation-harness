@@ -10,7 +10,7 @@ from . import (
     optimum_lm,
     textsynth,
     vllm_causallms,
-    # mixtral_scattermoe,
+    mixtral_scattermoe,
     openllama_sb,
     openllama
 )
