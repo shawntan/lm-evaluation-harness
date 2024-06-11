@@ -12,7 +12,8 @@ from . import (
     vllm_causallms,
     mixtral_scattermoe,
     openllama_sb,
-    openllama
+    openllama, 
+    sut
 )
 
 
