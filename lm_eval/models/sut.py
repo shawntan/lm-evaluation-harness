@@ -34,7 +34,7 @@ from lm_eval.models.utils import (
     stop_sequences_criteria,
 )
 import sys
-sys.path.insert(1, '/workspace/shawntan/scattersut/SparseGPT/')
+sys.path.insert(1, '../SparseGPT/')
 import importlib
 
 
