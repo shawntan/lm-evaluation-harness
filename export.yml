@@ -1,0 +1,9 @@
+load_args:
+  # load_path: ../dolomite-engine/checkpoints/stickbreaking/
+  load_path: ../dolomite-engine/checkpoints/baseline/
+  iteration: 24000
+
+mixed_precision_args:
+  dtype: fp32
+
+export_path: exported_huggingface_model
