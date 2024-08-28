@@ -4,7 +4,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import List, Literal, Optional, Tuple, Union
 import sys
-sys.path.insert(1, '../experimental/dolomite-engine/')
+# sys.path.insert(1, '../dolomite-engine/')
 from dolomite_engine.hf_models import GPTDolomiteForCausalLM
 
 import torch
@@ -547,8 +547,11 @@ class HFLM(TemplateLM):
                 trust_remote_code=trust_remote_code,
                 **model_kwargs,
             )
+            self.use_padding_free_transformer = model_kwargs['use_padding_free_transformer']
+            print("use_padding_free_transformer", self.use_padding_free_transformer)
             import inspect
             print(inspect.getfile(self._model.__class__))
+            print(model_kwargs)
         else:
             try:
                 from auto_gptq import AutoGPTQForCausalLM
@@ -786,14 +789,25 @@ class HFLM(TemplateLM):
         stopping_criteria = stop_sequences_criteria(
             self.tokenizer, stop, context.shape[1], context.shape[0]
         )
-        return self.model.generate(
-            input_ids=context,
-            max_length=max_length,
-            stopping_criteria=stopping_criteria,
-            pad_token_id=self.tokenizer.pad_token_id,
-            use_cache=True,
-            **generation_kwargs,
-        )
+        if self.use_padding_free_transformer:
+            assert context.size(0) == 1
+            return self.model.generate(
+                input_ids=context,
+                max_length=max_length,
+                stopping_criteria=stopping_criteria,
+                pad_token_id=self.tokenizer.pad_token_id,
+                use_cache=False,
+                **generation_kwargs,
+            )
+        else:
+            return self.model.generate(
+                input_ids=context,
+                max_length=max_length,
+                stopping_criteria=stopping_criteria,
+                pad_token_id=self.tokenizer.pad_token_id,
+                use_cache=True,
+                **generation_kwargs,
+            )
 
     def _select_cont_toks(
         self, logits: torch.Tensor, contlen: int = None, inplen: int = None
@@ -1049,11 +1063,16 @@ class HFLM(TemplateLM):
                     "attn_mask": batched_encoder_mask,
                     "labels": batched_conts,
                 }
-
-            multi_logits = F.log_softmax(
-                # self._model_call(batched_inps[0], **call_kwargs), dim=-1
-                self._model_call(batched_inps, **call_kwargs), dim=-1
-            )  # [batch, padding_length (inp or cont), vocab]
+            if self.use_padding_free_transformer:
+                assert batched_inps.size(0) == 1
+                multi_logits = F.log_softmax(
+                    self._model_call(batched_inps[0], **call_kwargs), dim=-1
+                )  # [batch, padding_length (inp or cont), vocab]
+                multi_logits = multi_logits.unsqueeze(0)
+            else:
+                multi_logits = F.log_softmax(
+                    self._model_call(batched_inps, **call_kwargs), dim=-1
+                )  # [batch, padding_length (inp or cont), vocab]
             # multi_logits = multi_logits[0] # TODO added.
             # multi_logits = multi_logits[None, :]
 
