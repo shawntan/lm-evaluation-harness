@@ -4,8 +4,9 @@ from datetime import timedelta
 from pathlib import Path
 from typing import List, Literal, Optional, Tuple, Union
 import sys
-# sys.path.insert(1, '../dolomite-engine/')
-from dolomite_engine.hf_models import GPTDolomiteForCausalLM
+sys.path.insert(1, '../dolomite-engine/')
+from dolomite_engine.hf_models import SBDolomiteForCausalLM
+# from dolomite_engine.hf_models import SBDolomiteForCausalLM
 
 import torch
 import torch.nn.functional as F
@@ -70,7 +71,7 @@ def _get_accelerate_args(
 class HFLM(TemplateLM):
     """
     An abstracted Huggingface model class. Enables usage with both models of
-    `GPTDolomiteForCausalLM` and `transformers.AutoModelForSeq2SeqLM` classes.
+    `SBDolomiteForCausalLM` and `transformers.AutoModelForSeq2SeqLM` classes.
 
     Supports data-parallel multi-GPU with HF Accelerate.
     """
@@ -427,7 +428,7 @@ class HFLM(TemplateLM):
         if backend != "default":
             # if we've settled on non-default backend, use that manually
             if backend == "causal":
-                self.AUTO_MODEL_CLASS = GPTDolomiteForCausalLM
+                self.AUTO_MODEL_CLASS = SBDolomiteForCausalLM
             elif backend == "seq2seq":
                 self.AUTO_MODEL_CLASS = transformers.AutoModelForSeq2SeqLM
             eval_logger.info(
@@ -446,7 +447,7 @@ class HFLM(TemplateLM):
             elif (
                 getattr(self.config, "model_type") in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES
             ):
-                self.AUTO_MODEL_CLASS = GPTDolomiteForCausalLM
+                self.AUTO_MODEL_CLASS = SBDolomiteForCausalLM
             else:
                 if not trust_remote_code:
                     eval_logger.warning(
@@ -455,10 +456,10 @@ class HFLM(TemplateLM):
                     )
                 # if model type is neither in HF transformers causal or seq2seq model registries
                 # then we default to AutoModelForCausalLM
-                self.AUTO_MODEL_CLASS = GPTDolomiteForCausalLM
+                self.AUTO_MODEL_CLASS = SBDolomiteForCausalLM
 
         assert self.AUTO_MODEL_CLASS in [
-            GPTDolomiteForCausalLM,
+            SBDolomiteForCausalLM,
             transformers.AutoModelForSeq2SeqLM,
         ]
         return None
@@ -547,7 +548,8 @@ class HFLM(TemplateLM):
                 trust_remote_code=trust_remote_code,
                 **model_kwargs,
             )
-            self.use_padding_free_transformer = model_kwargs['use_padding_free_transformer']
+            print(self._model)
+            self.use_padding_free_transformer = model_kwargs.get('use_padding_free_transformer', False)
             print("use_padding_free_transformer", self.use_padding_free_transformer)
             import inspect
             print(inspect.getfile(self._model.__class__))
@@ -695,7 +697,7 @@ class HFLM(TemplateLM):
 
         # by default for CausalLM - false or self.add_bos_token is set
         if add_special_tokens is None:
-            if self.AUTO_MODEL_CLASS == GPTDolomiteForCausalLM:
+            if self.AUTO_MODEL_CLASS == SBDolomiteForCausalLM:
                 special_tokens_kwargs = {
                     "add_special_tokens": False or self.add_bos_token
                 }
@@ -723,7 +725,7 @@ class HFLM(TemplateLM):
         self.tokenizer.padding_side = padding_side
 
         add_special_tokens = {}
-        if self.AUTO_MODEL_CLASS == GPTDolomiteForCausalLM:
+        if self.AUTO_MODEL_CLASS == SBDolomiteForCausalLM:
             add_special_tokens = {"add_special_tokens": False or self.add_bos_token}
 
         encoding = self.tokenizer(
@@ -768,7 +770,7 @@ class HFLM(TemplateLM):
                     input_ids=inps, attention_mask=attn_mask, labels=labels
                 ).logits
             else:
-                assert self.AUTO_MODEL_CLASS == GPTDolomiteForCausalLM
+                assert self.AUTO_MODEL_CLASS == SBDolomiteForCausalLM
                 return self.model(inps).logits
 
     def _model_generate(self, context, max_length, stop, **generation_kwargs):
@@ -796,7 +798,7 @@ class HFLM(TemplateLM):
                 max_length=max_length,
                 stopping_criteria=stopping_criteria,
                 pad_token_id=self.tokenizer.pad_token_id,
-                use_cache=False,
+                use_cache=True,
                 **generation_kwargs,
             )
         else:
@@ -812,7 +814,7 @@ class HFLM(TemplateLM):
     def _select_cont_toks(
         self, logits: torch.Tensor, contlen: int = None, inplen: int = None
     ) -> torch.Tensor:
-        if self.AUTO_MODEL_CLASS == GPTDolomiteForCausalLM:
+        if self.AUTO_MODEL_CLASS == SBDolomiteForCausalLM:
             assert (
                 contlen and inplen
             ), "Must pass input len and cont. len to select scored logits for causal LM"
@@ -939,7 +941,7 @@ class HFLM(TemplateLM):
             requests,
             sort_fn=_collate,
             group_by="contexts"
-            if self.AUTO_MODEL_CLASS == GPTDolomiteForCausalLM
+            if self.AUTO_MODEL_CLASS == SBDolomiteForCausalLM
             and self.logits_cache
             else None,
             group_fn=_lookup_one_token_cont,
@@ -997,7 +999,7 @@ class HFLM(TemplateLM):
                 # cont_toks      4 5 6 7 8 9      [:, -len(continuation_enc):, :self.vocab_size] slice
 
                 # when too long to fit in context, truncate from the left
-                if self.AUTO_MODEL_CLASS == GPTDolomiteForCausalLM:
+                if self.AUTO_MODEL_CLASS == SBDolomiteForCausalLM:
                     inp = torch.tensor(
                         (context_enc + continuation_enc)[-(self.max_length + 1) :][:-1],
                         dtype=torch.long,
@@ -1044,7 +1046,7 @@ class HFLM(TemplateLM):
             # padding_len_inp = 128 * (((padding_len_inp - 1) // 128) + 1) # TODO check padding.
             # create encoder attn mask and batched conts, if seq2seq
             call_kwargs = {}
-            if self.AUTO_MODEL_CLASS == GPTDolomiteForCausalLM:
+            if self.AUTO_MODEL_CLASS == SBDolomiteForCausalLM:
                 batched_inps = pad_and_concat(
                     padding_len_inp, inps, padding_side="right"
                 )  # [batch, padding_len_inp]
@@ -1087,7 +1089,7 @@ class HFLM(TemplateLM):
                 # from prompt/prefix tuning tokens, if applicable
                 ctx_len = (
                     inplen + (logits.shape[0] - padding_len_inp)
-                    if self.AUTO_MODEL_CLASS == GPTDolomiteForCausalLM
+                    if self.AUTO_MODEL_CLASS == SBDolomiteForCausalLM
                     else None
                 )
                 logits = self._select_cont_toks(logits, contlen=contlen, inplen=ctx_len)
@@ -1218,7 +1220,7 @@ class HFLM(TemplateLM):
                 max_gen_toks = self.max_gen_toks
 
             # set the max length in tokens of inputs ("context_enc")
-            if self.AUTO_MODEL_CLASS == GPTDolomiteForCausalLM:
+            if self.AUTO_MODEL_CLASS == SBDolomiteForCausalLM:
                 # max len for inputs = max length, minus room to generate the max new tokens
                 max_ctx_len = self.max_length - max_gen_toks
             elif self.AUTO_MODEL_CLASS == transformers.AutoModelForSeq2SeqLM:
@@ -1248,7 +1250,7 @@ class HFLM(TemplateLM):
             cont_toks_list = cont.tolist()
             for cont_toks, context in zip(cont_toks_list, contexts):
                 # discard context + left-padding toks if using causal decoder-only LM
-                if self.AUTO_MODEL_CLASS == GPTDolomiteForCausalLM:
+                if self.AUTO_MODEL_CLASS == SBDolomiteForCausalLM:
                     cont_toks = cont_toks[context_enc.shape[1] :]
 
                 s = self.tok_decode(cont_toks)

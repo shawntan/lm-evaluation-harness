@@ -7,6 +7,7 @@ from typing import Dict, List, Literal, Optional, Tuple, Union
 import torch
 import torch.nn.functional as F
 import transformers
+import dolomite_engine
 from accelerate import (
     Accelerator,
     InitProcessGroupKwargs,
@@ -544,6 +545,7 @@ class HFLM(TemplateLM):
         """
 
         model_kwargs = kwargs if kwargs else {}
+        # model_kwargs['rope_scaling'] = {"type": "dynamic", "factor": 1.0, "original_max_position_embeddings": 4096}
 
         model_kwargs.update(
             self._get_accelerate_args(
