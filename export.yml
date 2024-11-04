@@ -1,0 +1,4 @@
+load_args:
+  load_path: /proj/checkpoints/shawntan/stickbreaking-1b-128gpu-norem-bighead/
+  iteration: 250000
+unsharded_path: /proj/checkpoints/shawntan/stickbreaking-1b-128gpu-norem-bighead/hf

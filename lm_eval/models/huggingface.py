@@ -3,6 +3,7 @@ import os
 from datetime import timedelta
 from pathlib import Path
 from typing import Dict, List, Literal, Optional, Tuple, Union
+import dolomite_engine
 
 import torch
 import torch.nn.functional as F

@@ -1,0 +1,5 @@
+load_args:
+  load_path: /proj/checkpoints/mayank/power-3b-new-p2
+  iteration: 62500
+
+unsharded_path: granite_3b

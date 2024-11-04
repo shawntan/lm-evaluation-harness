@@ -1,22 +1,22 @@
 #!/bin/bash
 set -x
 export PYTHON_UNBUFFERED=1
-export PYTHONPATH=../dolomite-engine
-../dolomite-engine/scripts/unshard.sh export.yml
+export PYTHONPATH=/u/shawntan/proj/experimental/dolomite-engine
+/u/shawntan/proj/experimental/dolomite-engine/scripts/unshard.sh export.yml
 MAX_LENGTH=4096
 
 # MODEL_PATH=/proj/checkpoints/shawntan/stickbreaking-1b-newkernel/hf
-MODEL_PATH=/proj/checkpoints/shawntan/stickbreaking-1b-128gpu-norem-bighead/hf
+MODEL_PATH=/proj/checkpoints/shawn/varmoe-1b-p1/hf
 
 accelerate launch -m lm_eval \
-	--model dolomite \
-	--model_args "dtype=bfloat16,max_length=$((MAX_LENGTH)),pretrained=$MODEL_PATH,use_flash_attention_2=True,use_padding_free_transformer=True" \
+	--model hf \
+	--model_args "dtype=bfloat16,max_length=$((MAX_LENGTH)),pretrained=$MODEL_PATH" \
 	--batch_size 1 \
 	--tasks wikitext
-
+exit
 accelerate launch -m lm_eval \
 	--model dolomite \
-	--model_args "dtype=bfloat16,max_length=$((MAX_LENGTH * 2)),pretrained=$MODEL_PATH,use_flash_attention_2=True,use_padding_free_transformer=True" \
+	--model_args "dtype=bfloat16,max_length=$((MAX_LENGTH * 2)),pretrained=$MODEL_PATH" \
 	--batch_size 1 \
 	--tasks wikitext
 
